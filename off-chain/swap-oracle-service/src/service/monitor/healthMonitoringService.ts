@@ -10,6 +10,8 @@ import {logger} from "../../utils/logger";
 export class HealthMonitoringService {
     private pricingServices: IPricingService[]
     private monitoringData: HealthCheckResult[] = []
+    private lastWarnAtMs: Map<string, number> = new Map()
+    private readonly warnThrottleMs: number = 60_000
 
     constructor(
         @inject(TYPES.PricingServiceFactory) private pricingServiceFactory: PricingServiceFactory,
@@ -34,7 +36,25 @@ export class HealthMonitoringService {
 
     async startMonitoring(): Promise<void> {
         const pricePromises = this.pricingServices.map(async (priceService) => {
-            return await priceService.getHealth();
+            try {
+                return await priceService.getHealth();
+            } catch (error) {
+                let serviceName = 'UnknownService';
+                try {
+                serviceName = priceService.getPricingServiceType();
+                } catch {
+                // ignore
+                }
+
+                this.logWarnThrottled(serviceName, error);
+                return {
+                serviceType: serviceName,
+                status: HealthStatus.UN_HEALTHY,
+                hermes_connected: false,
+                cache_connected: false,
+                last_price_update: '',
+                } as HealthCheckResult;
+            }
         });
 
         logger.debug("Price data requested")
@@ -49,6 +69,18 @@ export class HealthMonitoringService {
             this.circuitBreakerService.reportHealthCheckSuccess();
         }
 
+    }
+
+    private logWarnThrottled(serviceName: string, error: unknown): void {
+        const now = Date.now();
+        const lastWarn = this.lastWarnAtMs.get(serviceName) ?? 0;
+        if (now - lastWarn >= this.warnThrottleMs) {
+            this.lastWarnAtMs.set(serviceName, now);
+            logger.warn(`Health check failed for service ${serviceName}`, {
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+            });
+        }
     }
 
     async getHealthMonitoringData(): Promise<HealthCheckResult[]> {
