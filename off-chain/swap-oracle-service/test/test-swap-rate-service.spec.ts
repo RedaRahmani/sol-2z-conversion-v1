@@ -13,42 +13,42 @@ const successTestData = [
     {
         name: "Basic 2:1 ratio",
         solPriceData: {
-            price: 2000000,
-            exponent: -6,
-            confidence: 4000
+            price: 200000000,
+            exponent: -8,
+            confidence: 400000
         },
         twozPriceData: {
-            price: 1000000,
-            exponent: -6,
-            confidence: 5000
+            price: 100000000,
+            exponent: -8,
+            confidence: 500000
         },
         expectedSwapRate: 2
     },
     {
-        name: "Fractional ratio with 6 decimal precision",
+        name: "Fractional ratio",
         solPriceData: {
-            price: 2500000,
-            exponent: -6,
-            confidence: 1000
+            price: 250000000,
+            exponent: -8,
+            confidence: 100000
         },
         twozPriceData: {
-            price: 1500000,
-            exponent: -6,
-            confidence: 3000
+            price: 150000000,
+            exponent: -8,
+            confidence: 300000
         },
         expectedSwapRate: 1.666667 // Rounded to 6 decimal places
     },
     {
         name: "Less than 1 ratio",
         solPriceData: {
-            price: 3000000,
-            exponent: -6,
-            confidence: 3500
+            price: 300000000,
+            exponent: -8,
+            confidence: 350000
         },
         twozPriceData: {
-            price: 5500000,
-            exponent: -6,
-            confidence: 4440
+            price: 550000000,
+            exponent: -8,
+            confidence: 444000
         },
         expectedSwapRate: 0.545455 // Rounded to 6 decimal places
     },
@@ -69,30 +69,114 @@ const successTestData = [
     {
         name: "Equal prices should give 1:1 ratio",
         solPriceData: {
-            price: 1000000,
-            exponent: -6,
-            confidence: 1000
+            price: 100000000,
+            exponent: -8,
+            confidence: 100000
         },
         twozPriceData: {
-            price: 1000000,
-            exponent: -6,
-            confidence: 1000
+            price: 100000000,
+            exponent: -8,
+            confidence: 100000
         },
         expectedSwapRate: 1
     },
     {
         name: "High precision decimal result",
         solPriceData: {
-            price: 1234567,
-            exponent: -6,
-            confidence: 1000
+            price: 123456700,
+            exponent: -8,
+            confidence: 100000
         },
         twozPriceData: {
-            price: 9876543,
-            exponent: -6,
-            confidence: 2000
+            price: 987654300,
+            exponent: -8,
+            confidence: 200000
         },
         expectedSwapRate: 0.125000 // 1.234567 / 9.876543 ≈ 0.125
+    },
+    {
+        name: "Scenario: Baseline ($200 SOL / $1 2Z)",
+        solPriceData: {
+            price: 20000000000,    // $200 with exponent -8
+            exponent: -8,
+            confidence: 10000000   // $0.10 (0.05% ratio)
+        },
+        twozPriceData: {
+            price: 100000000,      // $1 with exponent -8
+            exponent: -8,
+            confidence: 100000     // $0.001 (0.1% ratio)
+        },
+        expectedSwapRate: 200
+    },
+    {
+        name: "Scenario: SOL up ($500 SOL / $1 2Z)",
+        solPriceData: {
+            price: 50000000000,    // $500 with exponent -8
+            exponent: -8,
+            confidence: 25000000   // $0.25 (0.05% ratio)
+        },
+        twozPriceData: {
+            price: 100000000,      // $1 with exponent -8
+            exponent: -8,
+            confidence: 100000     // $0.001 (0.1% ratio)
+        },
+        expectedSwapRate: 500
+    },
+    {
+        name: "Scenario: SOL down ($50 SOL / $1 2Z)",
+        solPriceData: {
+            price: 5000000000,     // $50 with exponent -8
+            exponent: -8,
+            confidence: 2500000    // $0.025 (0.05% ratio)
+        },
+        twozPriceData: {
+            price: 100000000,      // $1 with exponent -8
+            exponent: -8,
+            confidence: 100000     // $0.001 (0.1% ratio)
+        },
+        expectedSwapRate: 50
+    },
+    {
+        name: "Scenario: 2Z up ($200 SOL / $2 2Z)",
+        solPriceData: {
+            price: 20000000000,    // $200 with exponent -8
+            exponent: -8,
+            confidence: 10000000   // $0.10 (0.05% ratio)
+        },
+        twozPriceData: {
+            price: 200000000,      // $2 with exponent -8
+            exponent: -8,
+            confidence: 200000     // $0.002 (0.1% ratio)
+        },
+        expectedSwapRate: 100
+    },
+    {
+        name: "Scenario: 2Z down ($200 SOL / $0.50 2Z)",
+        solPriceData: {
+            price: 20000000000,    // $200 with exponent -8
+            exponent: -8,
+            confidence: 10000000   // $0.10 (0.05% ratio)
+        },
+        twozPriceData: {
+            price: 50000000,       // $0.50 with exponent -8
+            exponent: -8,
+            confidence: 50000      // $0.0005 (0.1% ratio)
+        },
+        expectedSwapRate: 400
+    },
+    {
+        name: "Scenario: Fractional ($150 SOL / $1.10 2Z)",
+        solPriceData: {
+            price: 15000000000,    // $150 with exponent -8
+            exponent: -8,
+            confidence: 7500000    // $0.075 (0.05% ratio)
+        },
+        twozPriceData: {
+            price: 110000000,      // $1.10 with exponent -8
+            exponent: -8,
+            confidence: 110000     // $0.0011 (0.1% ratio)
+        },
+        expectedSwapRate: 136.363636 // 150 / 1.10 ≈ 136.363636
     }
 ];
 
@@ -100,56 +184,56 @@ const confidenceFailureTestData = [
     {
         name: "SOL confidence too high",
         solPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 8000 // $0.008 = 0.8% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 800000 // $0.008 = 0.8% confidence ratio
         },
         twozPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 1000 // $0.001 = 0.1% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 100000 // $0.001 = 0.1% confidence ratio
         },
         shouldPass: false
     },
     {
         name: "TWOZ confidence too high",
         solPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 1000 // $0.001 = 0.1% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 100000 // $0.001 = 0.1% confidence ratio
         },
         twozPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 8000 // $0.008 = 0.8% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 800000 // $0.008 = 0.8% confidence ratio
         },
         shouldPass: false
     },
     {
         name: "Both confidences too high",
         solPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 5000 // $0.005 = 0.5% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 500000 // $0.005 = 0.5% confidence ratio
         },
         twozPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 5000 // $0.005 = 0.5% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 500000 // $0.005 = 0.5% confidence ratio
         },
         shouldPass: false
     },
     {
         name: "Edge case: exactly at threshold (should pass)",
         solPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 3500 // $0.0035 = 0.35% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 350000 // $0.0035 = 0.35% confidence ratio
         },
         twozPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 3500 // $0.0035 = 0.35% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 350000 // $0.0035 = 0.35% confidence ratio
         },
         shouldPass: true,
         expectedSwapRate: 1
@@ -157,14 +241,14 @@ const confidenceFailureTestData = [
     {
         name: "Just over threshold (should fail)",
         solPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 3501 // $0.003501 = 0.3501% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 350100 // $0.003501 = 0.3501% confidence ratio
         },
         twozPriceData: {
-            price: 1000000, // $1
-            exponent: -6,
-            confidence: 3501 // $0.003501 = 0.3501% confidence ratio
+            price: 100000000, // $1 with exponent -8
+            exponent: -8,
+            confidence: 350100 // $0.003501 = 0.3501% confidence ratio
         },
         shouldPass: false
     }
@@ -174,13 +258,13 @@ const edgeCaseTestData = [
     {
         name: "Zero confidence values",
         solPriceData: {
-            price: 1000000,
-            exponent: -6,
+            price: 100000000,     // $1.00 with exponent -8
+            exponent: -8,
             confidence: 0
         },
         twozPriceData: {
-            price: 500000,
-            exponent: -6,
+            price: 50000000,       // $0.50 with exponent -8
+            exponent: -8,
             confidence: 0
         },
         expectedSwapRate: 2
@@ -202,14 +286,14 @@ const edgeCaseTestData = [
     {
         name: "String price inputs",
         solPriceData: {
-            price: "2000000",
-            exponent: -6,
-            confidence: "1000"
+            price: "200000000",    // $2.00 with exponent -8
+            exponent: -8,
+            confidence: "100000"   // $0.001
         },
         twozPriceData: {
-            price: "1000000",
-            exponent: -6,
-            confidence: "500"
+            price: "100000000",    // $1.00 with exponent -8
+            exponent: -8,
+            confidence: "50000"    // $0.0005
         },
         expectedSwapRate: 2
     }
@@ -320,13 +404,13 @@ describe('SwapRateService', () => {
     describe('Confidence ratio calculations', () => {
         it('should calculate confidence ratios correctly', async () => {
             const solPriceData = {
-                price: 1000000,
-                exponent: -6,
-                confidence: 7000
+                price: 100000000,      // $1 with exponent -8
+                exponent: -8,
+                confidence: 700000     // $0.007 = 0.7% confidence ratio
             };
             const twozPriceData = {
-                price: 1000000,
-                exponent: -6,
+                price: 100000000,      // $1 with exponent -8
+                exponent: -8,
                 confidence: 0
             };
 
@@ -339,14 +423,14 @@ describe('SwapRateService', () => {
 
         it('should reject when combined confidence ratio exceeds 0.7%', async () => {
             const solPriceData = {
-                price: 1000000,
-                exponent: -6,
-                confidence: 4000
+                price: 100000000,      // $1 with exponent -8
+                exponent: -8,
+                confidence: 400000     // $0.004 = 0.4% confidence ratio
             };
             const twozPriceData = {
-                price: 1000000,
-                exponent: -6,
-                confidence: 4000
+                price: 100000000,      // $1 with exponent -8
+                exponent: -8,
+                confidence: 400000     // $0.004 = 0.4% confidence ratio
             };
 
             try {
@@ -364,14 +448,14 @@ describe('SwapRateService', () => {
     describe('Return value structure validation', () => {
         it('should return properly structured PriceRate object', async () => {
             const solPriceData = {
-                price: 1500000,
-                exponent: -6,
-                confidence: 1000
+                price: 150000000,      // $1.50 with exponent -8
+                exponent: -8,
+                confidence: 100000     // $0.001
             };
             const twozPriceData = {
-                price: 1000000,
-                exponent: -6,
-                confidence: 500
+                price: 100000000,      // $1.00 with exponent -8
+                exponent: -8,
+                confidence: 50000      // $0.0005
             };
 
             const result = await swapRateService.swapRateCalculation(
