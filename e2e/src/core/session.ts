@@ -79,14 +79,12 @@ export abstract class Session {
         return new Promise((resolve, reject) => {
             exec(cliCommand, (error, stdout, stderr) => {
                 if (error) {
-                    reject(error.message);
+                    const logs = [stdout, stderr].filter(Boolean).join("\n").trim();
+                    reject(logs || error.message);
                     return;
                 }
-                if (stderr) {
-                    reject(stderr);
-                    return;
-                }
-                resolve(stdout);
+                const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+                resolve(output);
             });
         });
     }

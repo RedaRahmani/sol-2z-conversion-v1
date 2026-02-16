@@ -102,6 +102,11 @@ print_status_bar() {
 # -------------------- Validator Management --------------------
 VALIDATOR_PID=""
 LEDGER_DIR=""
+VALIDATOR_LOG="$SCRIPT_DIR/validator.log"
+LOCAL_ORACLE_PID=""
+LOCAL_ORACLE_KEYPAIR=""
+LOCAL_ORACLE_PORT=""
+LOCAL_ORACLE_LOG="$SCRIPT_DIR/e2e-oracle.log"
 
 start_validator_with_mock_transfer_program() {
     local RPC_PORT=$1
@@ -125,14 +130,14 @@ start_validator_with_mock_transfer_program() {
         --rpc-port "$RPC_PORT" \
         --ledger "$LEDGER_DIR" \
         $EXTRA_ARGS \
-        > validator.log 2>&1 &
+        > "$VALIDATOR_LOG" 2>&1 &
 
     VALIDATOR_PID=$!
 
     # Confirm process is alive
     sleep 1
     if ! kill -0 "$VALIDATOR_PID" 2>/dev/null; then
-        log_error "Validator failed to launch (check validator.log)."
+        log_error "Validator failed to launch (check $VALIDATOR_LOG)."
         exit 1
     fi
 
@@ -178,7 +183,7 @@ wait_for_validator() {
 
     for ((i=1; i<=RETRIES; i++)); do
         if ! kill -0 "$VALIDATOR_PID" 2>/dev/null; then
-            log_error "Validator process died unexpectedly (see validator.log)."
+            log_error "Validator process died unexpectedly (see $VALIDATOR_LOG)."
             return 1
         fi
 
@@ -217,8 +222,122 @@ wait_for_port_release() {
     exit 1
 }
 
-# Cleanup validator on script exit
-trap 'stop_validator' EXIT
+wait_for_local_oracle() {
+    local ORACLE_URL=$1
+    local RETRIES=15
+    local SLEEP_TIME=1
+
+    for ((i=1; i<=RETRIES; i++)); do
+        if [ -n "$LOCAL_ORACLE_PID" ] && ! kill -0 "$LOCAL_ORACLE_PID" 2>/dev/null; then
+            log_error "Local oracle process died unexpectedly (see $LOCAL_ORACLE_LOG)."
+            return 1
+        fi
+
+        if curl -fsS "$ORACLE_URL" > /dev/null 2>&1; then
+            log_success "Local oracle is up at $ORACLE_URL"
+            return 0
+        fi
+
+        log_info "Waiting for local oracle at $ORACLE_URL (Attempt $i/$RETRIES)..."
+        sleep $SLEEP_TIME
+    done
+
+    return 1
+}
+
+configure_e2e_runtime_config() {
+    local ORACLE_PUBKEY=$1
+    local ORACLE_ENDPOINT=$2
+    local E2E_CONFIG_PATH="$SCRIPT_DIR/e2e/cli/config.json"
+
+    if [ ! -f "$E2E_CONFIG_PATH" ]; then
+        log_error "Missing e2e config at $E2E_CONFIG_PATH"
+        return 1
+    fi
+
+    node - "$E2E_CONFIG_PATH" "$ORACLE_PUBKEY" "$ORACLE_ENDPOINT" <<'NODE'
+const fs = require("fs");
+
+const configPath = process.argv[2];
+const oraclePubkey = process.argv[3];
+const oracleEndpoint = process.argv[4];
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+
+config.double_zero_program_id = "dzrevZC94tBLwuHw1dyynZxaXTWyp7yocsinyEVPtt4";
+config.oracle_pubkey = oraclePubkey;
+config.price_oracle_end_point = oracleEndpoint;
+
+fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+NODE
+
+    log_success "E2E config updated for local validator and local oracle."
+}
+
+start_local_oracle() {
+    local DEFAULT_ORACLE_PORT=18080
+    local ORACLE_PATH="/qa-release/api/v1/swap-rate"
+
+    stop_local_oracle
+
+    LOCAL_ORACLE_PORT="$DEFAULT_ORACLE_PORT"
+    while lsof -i :"$LOCAL_ORACLE_PORT" >/dev/null 2>&1; do
+        LOCAL_ORACLE_PORT=$((LOCAL_ORACLE_PORT + 1))
+    done
+
+    LOCAL_ORACLE_KEYPAIR=$(mktemp)
+    solana-keygen new --no-bip39-passphrase --silent --force --outfile "$LOCAL_ORACLE_KEYPAIR" >/dev/null
+    local ORACLE_PUBKEY
+    ORACLE_PUBKEY=$(solana-keygen pubkey "$LOCAL_ORACLE_KEYPAIR")
+    local ORACLE_ENDPOINT="http://127.0.0.1:${LOCAL_ORACLE_PORT}${ORACLE_PATH}"
+
+    log_info "Starting local oracle on $ORACLE_ENDPOINT"
+    node "$SCRIPT_DIR/e2e/scripts/local-oracle.cjs" \
+        --keypair "$LOCAL_ORACLE_KEYPAIR" \
+        --host "127.0.0.1" \
+        --port "$LOCAL_ORACLE_PORT" \
+        --path "$ORACLE_PATH" \
+        > "$LOCAL_ORACLE_LOG" 2>&1 &
+
+    LOCAL_ORACLE_PID=$!
+    sleep 1
+
+    if ! kill -0 "$LOCAL_ORACLE_PID" 2>/dev/null; then
+        log_error "Local oracle failed to launch (see $LOCAL_ORACLE_LOG)."
+        return 1
+    fi
+
+    if ! wait_for_local_oracle "$ORACLE_ENDPOINT"; then
+        log_error "Local oracle did not become ready (see $LOCAL_ORACLE_LOG)."
+        return 1
+    fi
+
+    configure_e2e_runtime_config "$ORACLE_PUBKEY" "$ORACLE_ENDPOINT"
+}
+
+stop_local_oracle() {
+    if [ -n "$LOCAL_ORACLE_PID" ] && kill -0 "$LOCAL_ORACLE_PID" 2>/dev/null; then
+        log_info "Stopping local oracle PID $LOCAL_ORACLE_PID"
+        kill "$LOCAL_ORACLE_PID" 2>/dev/null || true
+        wait "$LOCAL_ORACLE_PID" 2>/dev/null || true
+    fi
+
+    LOCAL_ORACLE_PID=""
+    LOCAL_ORACLE_PORT=""
+
+    if [ -n "$LOCAL_ORACLE_KEYPAIR" ] && [ -f "$LOCAL_ORACLE_KEYPAIR" ]; then
+        rm -f "$LOCAL_ORACLE_KEYPAIR"
+    fi
+    LOCAL_ORACLE_KEYPAIR=""
+}
+
+cleanup() {
+    stop_local_oracle
+    stop_validator
+    killall -9 solana-test-validator 2>/dev/null || true
+}
+
+# Cleanup on script exit.
+trap 'cleanup' EXIT INT TERM
 
 # -------------------- Program Management --------------------
 build_anchor_program() {
@@ -299,17 +418,29 @@ run_test() {
 
     if [ "$TEST_TYPE" == "e2e" ]; then
         cd $SCRIPT_DIR/e2e || exit 1
+        set +e
         npm run $TEST_SCRIPT
         RESULT=$?
+        set -e
     else
+        set +e
         anchor run $TEST_SCRIPT --provider.cluster $RPC_URL
         RESULT=$?
+        set -e
     fi
 
     if [ $RESULT -eq 0 ]; then
         log_success "Test Passed: $TEST_SCRIPT"
     else
         log_error "Test Failed: $TEST_SCRIPT"
+        if [ -f "$VALIDATOR_LOG" ]; then
+            log_warning "Last 80 lines of $VALIDATOR_LOG"
+            tail -n 80 "$VALIDATOR_LOG" || true
+        fi
+        if [ -f "$LOCAL_ORACLE_LOG" ]; then
+            log_warning "Last 80 lines of $LOCAL_ORACLE_LOG"
+            tail -n 80 "$LOCAL_ORACLE_LOG" || true
+        fi
         FAILED_TESTS+=("$TEST_SCRIPT")
         FAILED_COUNT=$((FAILED_COUNT + 1))
     fi
@@ -324,7 +455,6 @@ run_test() {
 print_header
 # Ensure no leftover validator is running before we start
 stop_validator
-trap 'killall -9 solana-test-validator 2>/dev/null || true' EXIT
 
 # Build the double zero converter program
 cd ./on-chain || exit 1
@@ -344,6 +474,8 @@ if [ "$TEST_TYPE" == "e2e" ]; then
     cd $SCRIPT_DIR/e2e || exit 1
     npm install > /dev/null
     cd $SCRIPT_DIR
+
+    start_local_oracle
 fi
 
 for TEST_SCRIPT in "${ACTIVE_TESTS[@]}"; do

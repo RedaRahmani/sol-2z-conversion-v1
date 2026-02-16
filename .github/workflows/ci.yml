@@ -5,6 +5,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   onchain-unit:
     runs-on: ubuntu-latest
@@ -36,3 +39,105 @@ jobs:
       - run: npm install
       - run: npm run test
       - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - name: Enable corepack and pin Yarn
+        run: |
+          corepack enable
+          corepack prepare yarn@1.22.22 --activate
+      - name: Install agave solana tools
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v3.0.12/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      - name: Install Anchor
+        run: |
+          curl -L https://github.com/solana-foundation/anchor/releases/download/v0.32.1/anchor-0.32.1-x86_64-unknown-linux-gnu -o /usr/local/bin/anchor
+          chmod +x /usr/local/bin/anchor
+      - name: Generate solana keypair
+        run: solana-keygen new --no-bip39-passphrase --silent --force
+      - name: Install on-chain JS deps
+        run: cd on-chain && yarn install --frozen-lockfile
+      - name: Install e2e JS deps
+        run: |
+          if [ -f e2e/package-lock.json ]; then
+            npm ci --prefix e2e
+          fi
+      - name: Run E2E tests (rerun once on flaky failure)
+        run: |
+          set +e
+          echo "::group::E2E attempt 1"
+          ./provision.sh -w run-tests --test-type e2e
+          FIRST_RC=$?
+          echo "::endgroup::"
+
+          if [ $FIRST_RC -eq 0 ]; then
+            echo "E2E passed on first attempt."
+            exit 0
+          fi
+
+          echo "::warning::E2E failed on attempt 1 (exit $FIRST_RC). Preserving logs and retrying once…"
+
+          # Preserve first-attempt validator logs
+          mkdir -p /tmp/e2e-attempt-1
+          cp -f validator-*.log /tmp/e2e-attempt-1/ 2>/dev/null || true
+
+          # Kill any leftover validator
+          pkill -9 -f solana-test-validator 2>/dev/null || true
+          sleep 3
+
+          echo "::group::E2E attempt 2"
+          ./provision.sh -w run-tests --test-type e2e
+          SECOND_RC=$?
+          echo "::endgroup::"
+
+          if [ $SECOND_RC -ne 0 ]; then
+            echo "::error::E2E failed on BOTH attempts — not flaky, genuinely broken."
+            echo "=== First-attempt logs ==="
+            for f in /tmp/e2e-attempt-1/validator-*.log; do
+              [ -f "$f" ] && echo "--- $(basename $f) ---" && tail -100 "$f"
+            done
+            exit 1
+          fi
+
+          echo "::warning::E2E passed on attempt 2 — was flaky. Investigate first-attempt logs."
+          exit 0
+      - name: Dump debug info on failure
+        if: failure()
+        run: |
+          echo "=== Tool versions ==="
+          solana --version || true
+          anchor --version || true
+          rustc --version || true
+          node --version || true
+          npm --version || true
+          yarn --version || true
+          echo "=== Validator processes ==="
+          ps aux | grep -E "solana|validator" | grep -v grep || true
+          echo "=== Validator logs (last 200 lines each) ==="
+          for f in validator-*.log /tmp/e2e-attempt-1/validator-*.log; do
+            [ -f "$f" ] && echo "--- $f ---" && tail -200 "$f"
+          done
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-debug-artifacts
+          if-no-files-found: ignore
+          path: |
+            validator-*.log
+            /tmp/e2e-attempt-1/
+            e2e/cli/config.json
+      - name: Cleanup validator
+        if: always()
+        run: |
+          pkill -f solana-test-validator 2>/dev/null || true
+          sleep 2
+          pkill -9 -f solana-test-validator 2>/dev/null || true

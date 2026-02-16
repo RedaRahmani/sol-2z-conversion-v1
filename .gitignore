@@ -11,3 +11,6 @@ logs
 .terraform.lock.hcl
 .terraform
 tfplan
+.ledger-8899-*
+validator.log
+e2e-oracle.log
